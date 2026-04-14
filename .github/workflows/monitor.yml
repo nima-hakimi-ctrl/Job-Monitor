@@ -1,0 +1,67 @@
+name: Job Monitor
+
+on:
+  schedule:
+    # Run every 6 hours: at 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: '0 */6 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create .env file from secrets
+      run: |
+        echo "EMAIL_FROM=${{ secrets.EMAIL_FROM }}" >> .env
+        echo "EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}" >> .env
+        echo "EMAIL_TO=${{ secrets.EMAIL_TO }}" >> .env
+        echo "KEYWORDS=${{ secrets.KEYWORDS }}" >> .env
+        echo "LOCATIONS=${{ secrets.LOCATIONS }}" >> .env
+        echo "EXCLUDE_KEYWORDS=${{ secrets.EXCLUDE_KEYWORDS }}" >> .env
+        echo "MIN_SCORE=${{ secrets.MIN_SCORE }}" >> .env
+        echo "COMPANIES=${{ secrets.COMPANIES }}" >> .env
+    
+    - name: Restore database from cache
+      uses: actions/cache@v3
+      with:
+        path: data/jobs.db
+        key: jobs-db-${{ github.run_number }}
+        restore-keys: |
+          jobs-db-
+    
+    - name: Run job monitor
+      run: python main.py
+    
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: job-monitor-logs
+        path: |
+          *.log
+          data/jobs.db
+    
+    - name: Commit and push database updates
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add data/jobs.db
+        git diff --quiet && git diff --staged --quiet || git commit -m "Update job database [skip ci]"
+        git push
+      continue-on-error: true
